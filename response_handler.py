@@ -48,34 +48,40 @@ class ResponseHandler:
 
     def _format_message_with_context(self, message: Message, sentiment_details: dict, 
                                    username: str, is_reply: bool = False) -> str:
-        """Format message with sentiment context for better assistant responses"""
+        """Format message for the assistant"""
         reply_context = "This is a reply to your previous message. " if is_reply else ""
-        
-        chat_context = self.decision_engine.context_tracker.get_context_summary()
-        
-        context = f"""[Message Analysis:
-Sender: {username}
-Is Reply: {is_reply}
-Sentiment: {sentiment_details.get('sentiment_category', 'NEUTRAL')}
-Score: {sentiment_details.get('polarity', 0):.2f}
-Subjectivity: {sentiment_details.get('subjectivity', 0):.2f}
-Keywords: {', '.join(message.keywords) if message.keywords else 'None'}
-Current Chat Context: {chat_context.get('current_context', 'None')}
-Active Discussion Topics: {', '.join([topic[0] for topic in chat_context.get('top_topics', [])])}]
+        return f"{reply_context}User {username} says: {message.content}"
 
-{reply_context}Message: {message.content}"""
-        return context
+    def _get_full_context(self, message: Message, sentiment_details: dict,
+                         username: str, is_reply: bool = False) -> Dict:
+        """Get full context for logging purposes"""
+        chat_context = self.decision_engine.context_tracker.get_context_summary()
+        return {
+            'sender': username,
+            'is_reply': is_reply,
+            'sentiment': sentiment_details.get('sentiment_category', 'NEUTRAL'),
+            'score': sentiment_details.get('polarity', 0),
+            'subjectivity': sentiment_details.get('subjectivity', 0),
+            'keywords': message.keywords,
+            'current_context': chat_context.get('current_context', 'None'),
+            'active_topics': [topic[0] for topic in chat_context.get('top_topics', [])]
+        }
 
     async def get_assistant_response(self, chat_id: int, message: Message, 
                                    sentiment_details: dict, username: str, 
                                    is_reply: bool = False) -> str:
         """Get response from OpenAI assistant"""
         try:
+            # Get full context for logging
+            full_context = self._get_full_context(message, sentiment_details, username, is_reply)
+            logger.info(f"Processing message with context: {full_context}")
+            
             thread_id = await self._get_or_create_thread(chat_id)
             
+            # Simplified context for assistant
             context_message = self._format_message_with_context(
-                message, 
-                sentiment_details, 
+                message,
+                sentiment_details,  # Keep this param for method signature compatibility
                 username,
                 is_reply
             )
