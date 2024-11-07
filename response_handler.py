@@ -1,5 +1,5 @@
 # response_handler.py
-from typing import Dict, Tuple, List
+from typing import Dict, Tuple
 from datetime import datetime, timedelta
 import asyncio
 import logging
@@ -46,11 +46,8 @@ class ResponseHandler:
 
     def clean_response(self, text: str) -> str:
         """Clean up response text by removing reference notations"""
-        # Remove citation markers
         cleaned = re.sub(r'【\d+:\d+†[^】]+】', '', text)
-        # Remove file references
         cleaned = re.sub(r'\[.*?\]:', '', cleaned)
-        # Remove multiple spaces
         cleaned = re.sub(r'\s+', ' ', cleaned)
         return cleaned.strip()
 
@@ -67,7 +64,6 @@ class ResponseHandler:
     async def _get_or_create_thread(self, chat_id: int) -> str:
         """Get existing thread or create new one for the chat"""
         try:
-            # Convert chat_id to string for JSON serialization
             chat_id_str = str(chat_id)
             
             if chat_id_str not in self.thread_ids:
@@ -96,29 +92,8 @@ class ResponseHandler:
     def _format_message_with_context(self, message: Message, sentiment_details: dict, 
                                    username: str, is_reply: bool = False) -> str:
         """Format message for the assistant"""
-        # Include sentiment information for context
-        sentiment_score = sentiment_details.get('polarity', 0)
-        sentiment_category = sentiment_details.get('sentiment_category', 'NEUTRAL')
-        
-        # Build context string
-        context_parts = []
-        
-        # Add reply context if applicable
-        if is_reply:
-            context_parts.append("This is a reply to your previous message.")
-        
-        # Add sentiment context
-        context_parts.append(f"Message sentiment: {sentiment_category} ({sentiment_score:.2f})")
-        
-        # Add active topics if available
-        if message.keywords:
-            context_parts.append(f"Topics detected: {', '.join(message.keywords)}")
-        
-        # Combine context with user message
-        context_str = " | ".join(context_parts)
-        
-        return f"""Context: {context_str}
-User {username} says: {message.content}"""
+        reply_context = "This is a reply to your previous message. " if is_reply else ""
+        return f"{reply_context}User {username} says: {message.content}"
 
     def _get_full_context(self, message: Message, sentiment_details: dict,
                          username: str, is_reply: bool = False) -> Dict:
@@ -140,36 +115,22 @@ User {username} says: {message.content}"""
                                    is_reply: bool = False) -> str:
         """Get response from OpenAI assistant"""
         try:
-            # Get full context for logging
             full_context = self._get_full_context(message, sentiment_details, username, is_reply)
             logger.info(f"Processing message with context: {full_context}")
             
-            # Get or create thread
             thread_id = await self._get_or_create_thread(chat_id)
             
-            # Format message with context
-            context_message = self._format_message_with_context(
-                message,
-                sentiment_details,
-                username,
-                is_reply
-            )
-            
-            # Create message in thread
             self.client.beta.threads.messages.create(
                 thread_id=thread_id,
                 role="user",
-                content=context_message
+                content=self._format_message_with_context(message, sentiment_details, username, is_reply)
             )
             
-            # Create run with additional instructions
             run = self.client.beta.threads.runs.create(
                 thread_id=thread_id,
-                assistant_id=Settings.ASSISTANT_ID,
-                instructions="Maintain character and use file search for accurate information."
+                assistant_id=Settings.ASSISTANT_ID
             )
             
-            # Wait for response with timeout
             start_time = datetime.now()
             timeout = timedelta(seconds=30)
             
@@ -189,7 +150,6 @@ User {username} says: {message.content}"""
                 
                 await asyncio.sleep(1)
             
-            # Get the latest assistant message
             messages = self.client.beta.threads.messages.list(
                 thread_id=thread_id,
                 order="desc",
@@ -199,51 +159,10 @@ User {username} says: {message.content}"""
             for msg in messages.data:
                 if msg.role == "assistant":
                     response_text = msg.content[0].text.value
-                    cleaned_response = self.clean_response(response_text)
-                    
-                    # Log successful response
-                    logger.info(f"""
-Response generated:
-Thread ID: {thread_id}
-Raw Response: {response_text}
-Cleaned Response: {cleaned_response}
-                    """)
-                    
-                    return cleaned_response
+                    return self.clean_response(response_text)
             
             raise Exception("No assistant response found")
             
         except Exception as e:
             logger.error(f"Error getting assistant response: {str(e)}")
             raise
-
-    async def cleanup_old_threads(self, max_age_days: int = 7):
-        """Clean up old threads"""
-        try:
-            current_time = datetime.now()
-            threads_to_delete = []
-            
-            for chat_id, thread_id in self.thread_ids.items():
-                try:
-                    thread = self.client.beta.threads.retrieve(thread_id)
-                    thread_age = current_time - datetime.fromisoformat(thread.created_at)
-                    
-                    if thread_age.days > max_age_days:
-                        self.client.beta.threads.delete(thread_id)
-                        threads_to_delete.append(chat_id)
-                        logger.info(f"Deleted old thread {thread_id} for chat {chat_id}")
-                except Exception as e:
-                    logger.error(f"Error cleaning up thread {thread_id}: {str(e)}")
-                    threads_to_delete.append(chat_id)
-                
-                # Rate limiting
-                await asyncio.sleep(0.5)
-            
-            # Remove deleted threads from mapping
-            for chat_id in threads_to_delete:
-                del self.thread_ids[chat_id]
-            
-            self._save_thread_ids()
-            
-        except Exception as e:
-            logger.error(f"Error in thread cleanup: {str(e)}")
