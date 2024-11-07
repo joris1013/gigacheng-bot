@@ -4,6 +4,8 @@ from datetime import datetime, timedelta
 import asyncio
 import logging
 import re
+import json
+from pathlib import Path
 from openai import OpenAI
 from message import Message
 from settings import Settings
@@ -15,8 +17,30 @@ class ResponseHandler:
     def __init__(self, client: OpenAI, decision_engine: DecisionEngine):
         self.client = client
         self.decision_engine = decision_engine
-        self.thread_ids = {}
         self.last_response_times = {}
+        
+        # Load existing thread IDs from file
+        self.threads_file = Path("thread_ids.json")
+        if self.threads_file.exists():
+            try:
+                with open(self.threads_file, 'r') as f:
+                    self.thread_ids = json.load(f)
+                logger.info(f"Loaded {len(self.thread_ids)} existing threads")
+            except Exception as e:
+                logger.error(f"Error loading threads: {e}")
+                self.thread_ids = {}
+        else:
+            self.thread_ids = {}
+            logger.info("Starting with fresh thread mapping")
+
+    def _save_threads(self):
+        """Save thread IDs to file"""
+        try:
+            with open(self.threads_file, 'w') as f:
+                json.dump(self.thread_ids, f)
+            logger.info(f"Saved {len(self.thread_ids)} threads to file")
+        except Exception as e:
+            logger.error(f"Error saving threads: {e}")
 
     def clean_response(self, text: str) -> str:
         """Clean up response text by removing reference notations"""
@@ -34,14 +58,18 @@ class ResponseHandler:
                 return False
         return True
 
-    async def _get_or_create_thread(self, chat_id: int):
+    async def _get_or_create_thread(self, chat_id):
         """Get existing thread or create new one for the chat"""
         try:
-            if chat_id not in self.thread_ids:
+            chat_id_str = str(chat_id)
+            if chat_id_str not in self.thread_ids:
                 thread = self.client.beta.threads.create()
-                self.thread_ids[chat_id] = thread.id
-                logger.info(f"Created new thread for chat {chat_id}")
-            return self.thread_ids[chat_id]
+                self.thread_ids[chat_id_str] = thread.id
+                self._save_threads()  # Save after creating new thread
+                logger.info(f"Created new thread for chat {chat_id}: {thread.id}")
+            else:
+                logger.info(f"Using existing thread for chat {chat_id}: {self.thread_ids[chat_id_str]}")
+            return self.thread_ids[chat_id_str]
         except Exception as e:
             logger.error(f"Error creating/getting thread: {str(e)}")
             raise
@@ -81,7 +109,7 @@ class ResponseHandler:
             # Simplified context for assistant
             context_message = self._format_message_with_context(
                 message,
-                sentiment_details,  # Keep this param for method signature compatibility
+                sentiment_details,
                 username,
                 is_reply
             )

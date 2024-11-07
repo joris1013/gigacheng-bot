@@ -43,10 +43,17 @@ class ThreadResetter:
             raise
 
     def find_existing_threads(self) -> Dict:
-        """Find all existing threads from logs and current session"""
+        """Find all existing threads"""
         threads = {}
         try:
-            # Check current day's logs
+            # Check for persistent thread file
+            thread_file = Path("thread_ids.json")
+            if thread_file.exists():
+                with open(thread_file, 'r') as f:
+                    threads = json.load(f)
+                logger.info(f"Found {len(threads)} threads in thread_ids.json")
+
+            # Check analysis logs as backup
             logs_dir = Path("analysis_logs")
             if logs_dir.exists():
                 today = datetime.now().strftime("%Y-%m-%d")
@@ -56,17 +63,13 @@ class ThreadResetter:
                         for line in f:
                             try:
                                 data = json.loads(line)
-                                chat_id = data.get('chat_id')
-                                if chat_id:
-                                    threads[str(chat_id)] = None  # We'll create new threads for these
+                                chat_id = str(data.get('chat_id'))
+                                if chat_id and chat_id not in threads:
+                                    threads[chat_id] = None
                             except json.JSONDecodeError:
                                 continue
 
-            # Add any threads from current response handler
-            if hasattr(self.response_handler, 'thread_ids'):
-                threads.update(self.response_handler.thread_ids)
-
-            logger.info(f"Found {len(threads)} existing chat threads")
+            logger.info(f"Total threads found: {len(threads)}")
             return threads
 
         except Exception as e:
@@ -111,14 +114,13 @@ class ThreadResetter:
             # Backup current threads
             self.backup_current_threads(existing_threads)
             
-            # Process each chat
+            # Create new threads
+            new_threads = {}
             for chat_id in existing_threads.keys():
                 try:
                     # Create new thread
                     new_thread = self.client.beta.threads.create()
-                    
-                    # Update thread mapping
-                    self.response_handler.thread_ids[chat_id] = new_thread.id
+                    new_threads[chat_id] = new_thread.id
                     
                     logger.info(f"Reset thread for chat {chat_id}: New thread ID: {new_thread.id}")
                     results['success'].append({
@@ -133,6 +135,12 @@ class ThreadResetter:
                         'chat_id': chat_id,
                         'error': str(e)
                     })
+            
+            # Save new threads to file
+            if results['success']:
+                with open('thread_ids.json', 'w') as f:
+                    json.dump(new_threads, f, indent=2)
+                logger.info("Saved new thread mappings to thread_ids.json")
             
             return results
             
@@ -192,9 +200,9 @@ async def main():
             print("./update_bot.sh")
         else:
             print("\nNo threads found to reset. This could mean:")
-            print("1. The bot hasn't had any conversations yet")
+            print("1. No thread_ids.json file exists")
             print("2. The analysis logs are empty or not accessible")
-            print("3. The thread_ids dictionary is empty")
+            print("3. No chats have been processed yet")
             
     except Exception as e:
         logger.error(f"Error in main: {str(e)}")
