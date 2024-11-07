@@ -24,20 +24,11 @@ logger = logging.getLogger(__name__)
 class GigaChengGroupBot:
     def __init__(self):
         try:
-            # Load environment variables
+            # Just load environment variables and create client
             load_dotenv()
-            
-            # Initialize OpenAI client with assistants API
             self.client = OpenAI(api_key=Settings.OPENAI_API_KEY)
             
-            # Verify assistant exists
-            try:
-                self.assistant = self.client.beta.assistants.retrieve(Settings.ASSISTANT_ID)
-                logger.info(f"Successfully connected to assistant: {self.assistant.name}")
-            except Exception as e:
-                logger.error(f"Failed to retrieve assistant: {str(e)}")
-                raise
-            
+            # Initialize components
             self.decision_engine = DecisionEngine()
             self.bot_username = "GIGACHENG_BOT"
             self.analysis_logger = AnalysisLogger()

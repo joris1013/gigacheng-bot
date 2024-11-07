@@ -45,11 +45,8 @@ class ResponseHandler:
             logger.error(f"Error saving thread IDs: {str(e)}")
 
     def clean_response(self, text: str) -> str:
-        """Clean up response text by removing reference notations"""
-        cleaned = re.sub(r'【\d+:\d+†[^】]+】', '', text)
-        cleaned = re.sub(r'\[.*?\]:', '', cleaned)
-        cleaned = re.sub(r'\s+', ' ', cleaned)
-        return cleaned.strip()
+        """Clean up response text"""
+        return text.strip()
 
     async def _check_rate_limit(self, chat_id: int) -> bool:
         """Check if we should rate limit responses for this chat"""
@@ -70,7 +67,6 @@ class ResponseHandler:
                 thread = self.client.beta.threads.create()
                 self.thread_ids[chat_id_str] = thread.id
                 self._save_thread_ids()
-                logger.info(f"Created new thread for chat {chat_id}: {thread.id}")
                 return thread.id
             
             try:
@@ -80,57 +76,32 @@ class ResponseHandler:
                 thread = self.client.beta.threads.create()
                 self.thread_ids[chat_id_str] = thread.id
                 self._save_thread_ids()
-                logger.info(f"Recreated thread for chat {chat_id}: {thread.id}")
                 return thread.id
                 
         except Exception as e:
             logger.error(f"Error creating/getting thread: {str(e)}")
             raise
 
-    def _format_message_with_context(self, message: Message, sentiment_details: dict, 
-                                   username: str, is_reply: bool = False) -> str:
-        """Format message for the assistant"""
-        reply_context = "This is a reply to your previous message. " if is_reply else ""
-        return f"{reply_context}User {username} says: {message.content}"
-
-    def _get_full_context(self, message: Message, sentiment_details: dict,
-                         username: str, is_reply: bool = False) -> Dict:
-        """Get full context for logging purposes"""
-        chat_context = self.decision_engine.context_tracker.get_context_summary()
-        return {
-            'sender': username,
-            'is_reply': is_reply,
-            'sentiment': sentiment_details.get('sentiment_category', 'NEUTRAL'),
-            'score': sentiment_details.get('polarity', 0),
-            'subjectivity': sentiment_details.get('subjectivity', 0),
-            'keywords': message.keywords,
-            'current_context': chat_context.get('current_context', 'None'),
-            'active_topics': [topic[0] for topic in chat_context.get('top_topics', [])]
-        }
-
     async def get_assistant_response(self, chat_id: int, message: Message, 
                                    sentiment_details: dict, username: str, 
                                    is_reply: bool = False) -> str:
         """Get response from OpenAI assistant"""
         try:
-            full_context = self._get_full_context(message, sentiment_details, username, is_reply)
-            logger.info(f"Processing message with context: {full_context}")
-            
             thread_id = await self._get_or_create_thread(chat_id)
             
-            # Create message
+            # Simply create message and get response
             self.client.beta.threads.messages.create(
                 thread_id=thread_id,
                 role="user",
-                content=self._format_message_with_context(message, sentiment_details, username, is_reply)
+                content=f"User {username} says: {message.content}"
             )
             
-            # Create run with assistant
             run = self.client.beta.threads.runs.create(
                 thread_id=thread_id,
                 assistant_id=Settings.ASSISTANT_ID
             )
             
+            # Wait for response
             start_time = datetime.now()
             timeout = timedelta(seconds=30)
             
@@ -150,6 +121,7 @@ class ResponseHandler:
                 
                 await asyncio.sleep(1)
             
+            # Get response
             messages = self.client.beta.threads.messages.list(
                 thread_id=thread_id,
                 order="desc",
@@ -158,8 +130,7 @@ class ResponseHandler:
             
             for msg in messages.data:
                 if msg.role == "assistant":
-                    response_text = msg.content[0].text.value
-                    return self.clean_response(response_text)
+                    return msg.content[0].text.value
             
             raise Exception("No assistant response found")
             
