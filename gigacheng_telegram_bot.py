@@ -27,45 +27,27 @@ class GigaChengGroupBot:
             # Load environment variables
             load_dotenv()
             
-            # Initialize OpenAI client with required headers
-            self.client = OpenAI(
-                api_key=Settings.OPENAI_API_KEY,
-                default_headers={
-                    "OpenAI-Beta": "assistants=v1"
-                }
-            )
+            # Initialize OpenAI client with assistants API
+            self.client = OpenAI(api_key=Settings.OPENAI_API_KEY)
             
-            # Initialize the assistant with file search capability
-            self.assistant = self.client.beta.assistants.retrieve(
-                assistant_id=Settings.ASSISTANT_ID
-            )
-            
-            # Log assistant configuration
-            logger.info(f"""
-Assistant Configuration:
-ID: {self.assistant.id}
-Name: {self.assistant.name}
-Model: {self.assistant.model}
-File IDs: {self.assistant.file_ids}
-            """)
-            
-            if not self.assistant.file_ids:
-                logger.warning("No files attached to assistant. File search may not work.")
+            # Verify assistant exists
+            try:
+                self.assistant = self.client.beta.assistants.retrieve(Settings.ASSISTANT_ID)
+                logger.info(f"Successfully connected to assistant: {self.assistant.name}")
+            except Exception as e:
+                logger.error(f"Failed to retrieve assistant: {str(e)}")
+                raise
             
             self.decision_engine = DecisionEngine()
             self.bot_username = "GIGACHENG_BOT"
             self.analysis_logger = AnalysisLogger()
-            self.response_handler = ResponseHandler(
-                self.client, 
-                self.decision_engine, 
-                self.assistant
-            )
+            self.response_handler = ResponseHandler(self.client, self.decision_engine)
             self.message_processor = MessageProcessor(
                 self.decision_engine,
                 self.response_handler,
                 self.analysis_logger
             )
-            logger.info("Bot initialized successfully with file search capability")
+            logger.info("Bot initialized successfully")
         except Exception as e:
             logger.error(f"Failed to initialize bot: {str(e)}")
             raise
@@ -107,17 +89,6 @@ File IDs: {self.assistant.file_ids}
                 
         except Exception as e:
             logger.error(f"Error handling message: {str(e)}")
-
-    async def _daily_summary_task(self):
-        """Generate daily summary at end of day"""
-        try:
-            summary = self.analysis_logger.generate_daily_summary()
-            self.analysis_logger.log_aggregate_stats({
-                'date': datetime.now().strftime('%Y-%m-%d'),
-                'summary': summary
-            })
-        except Exception as e:
-            logger.error(f"Error generating daily summary: {str(e)}")
 
     def run(self):
         """Run the bot"""

@@ -7,7 +7,6 @@ import re
 from pathlib import Path
 import json
 from openai import OpenAI
-from openai.types.beta.assistant import Assistant
 from message import Message
 from settings import Settings
 from decision_engine import DecisionEngine
@@ -15,10 +14,9 @@ from decision_engine import DecisionEngine
 logger = logging.getLogger(__name__)
 
 class ResponseHandler:
-    def __init__(self, client: OpenAI, decision_engine: DecisionEngine, assistant: Assistant):
+    def __init__(self, client: OpenAI, decision_engine: DecisionEngine):
         self.client = client
         self.decision_engine = decision_engine
-        self.assistant = assistant
         self.project_root = Path(__file__).resolve().parent
         self.thread_file = self.project_root / 'data' / 'thread_ids.json'
         self.thread_ids = self._load_thread_ids()
@@ -26,10 +24,6 @@ class ResponseHandler:
         
         # Create data directory if it doesn't exist
         self.thread_file.parent.mkdir(parents=True, exist_ok=True)
-        
-        # Log assistant configuration
-        logger.info(f"Response Handler initialized with assistant {self.assistant.id}")
-        logger.info(f"Assistant has {len(self.assistant.file_ids)} files attached")
 
     def _load_thread_ids(self) -> Dict[int, str]:
         """Load thread IDs from file"""
@@ -79,12 +73,10 @@ class ResponseHandler:
                 logger.info(f"Created new thread for chat {chat_id}: {thread.id}")
                 return thread.id
             
-            # Verify thread still exists
             try:
                 self.client.beta.threads.retrieve(self.thread_ids[chat_id_str])
                 return self.thread_ids[chat_id_str]
             except Exception:
-                # Thread doesn't exist, create new one
                 thread = self.client.beta.threads.create()
                 self.thread_ids[chat_id_str] = thread.id
                 self._save_thread_ids()
@@ -126,18 +118,17 @@ class ResponseHandler:
             
             thread_id = await self._get_or_create_thread(chat_id)
             
-            # Create message with instruction to use file search
+            # Create message
             self.client.beta.threads.messages.create(
                 thread_id=thread_id,
                 role="user",
-                content=f"{self._format_message_with_context(message, sentiment_details, username, is_reply)}"
+                content=self._format_message_with_context(message, sentiment_details, username, is_reply)
             )
             
-            # Create run with explicit instructions to use file search
+            # Create run with assistant
             run = self.client.beta.threads.runs.create(
                 thread_id=thread_id,
-                assistant_id=self.assistant.id,
-                instructions="Use file search to provide accurate information about projects and maintain character."
+                assistant_id=Settings.ASSISTANT_ID
             )
             
             start_time = datetime.now()
@@ -168,9 +159,7 @@ class ResponseHandler:
             for msg in messages.data:
                 if msg.role == "assistant":
                     response_text = msg.content[0].text.value
-                    cleaned_response = self.clean_response(response_text)
-                    logger.info(f"Generated response using file search: {cleaned_response[:100]}...")
-                    return cleaned_response
+                    return self.clean_response(response_text)
             
             raise Exception("No assistant response found")
             
