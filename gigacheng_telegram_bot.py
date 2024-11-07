@@ -1,3 +1,4 @@
+# Modified gigacheng_telegram_bot.py
 from telegram import Update
 from telegram.ext import Application, MessageHandler, CommandHandler, filters
 from openai import OpenAI
@@ -23,8 +24,30 @@ logger = logging.getLogger(__name__)
 class GigaChengGroupBot:
     def __init__(self):
         try:
-            # Initialize OpenAI client with API key from settings
-            self.client = OpenAI(api_key=Settings.OPENAI_API_KEY)
+            # Get the absolute path to the project root directory
+            self.project_root = Path(__file__).resolve().parent
+            
+            # Load environment variables from the correct path
+            env_path = self.project_root / '.env'
+            load_dotenv(dotenv_path=env_path)
+            
+            # Initialize OpenAI client with additional parameters
+            self.client = OpenAI(
+                api_key=Settings.OPENAI_API_KEY,
+                default_headers={
+                    "OpenAI-Beta": "assistants=v1"
+                }
+            )
+            
+            # Configure file paths for the assistant
+            self.file_paths = {
+                'instructions': self.project_root / 'gigacheng_instructions.txt',
+                'settings': self.project_root / 'settings.py',
+                'readme': self.project_root / 'README.md'
+            }
+            
+            # Verify assistant configuration and file access
+            self.verify_assistant_setup()
             
             self.decision_engine = DecisionEngine()
             self.bot_username = "GIGACHENG_BOT"
@@ -38,6 +61,38 @@ class GigaChengGroupBot:
             logger.info("Bot initialized successfully")
         except Exception as e:
             logger.error(f"Failed to initialize bot: {str(e)}")
+            raise
+
+    def verify_assistant_setup(self):
+        """Verify assistant configuration and file access"""
+        try:
+            # Retrieve the assistant
+            assistant = self.client.beta.assistants.retrieve(Settings.ASSISTANT_ID)
+            logger.info(f"Assistant retrieved: {assistant.name}")
+            
+            # Check if files are attached
+            files = self.client.files.list()
+            existing_files = [f.filename for f in files]
+            
+            # Upload necessary files if they're not already attached
+            for name, path in self.file_paths.items():
+                if path.name not in existing_files and path.exists():
+                    logger.info(f"Uploading file: {path.name}")
+                    with open(path, 'rb') as file:
+                        file_obj = self.client.files.create(
+                            file=file,
+                            purpose='assistants'
+                        )
+                        # Attach file to assistant
+                        self.client.beta.assistants.update(
+                            assistant_id=Settings.ASSISTANT_ID,
+                            file_ids=[file_obj.id]
+                        )
+                        logger.info(f"File uploaded and attached: {path.name}")
+                        
+            logger.info("Assistant configuration verified")
+        except Exception as e:
+            logger.error(f"Error verifying assistant setup: {str(e)}")
             raise
 
     async def handle_group_message(self, update: Update, context):
@@ -104,7 +159,6 @@ class GigaChengGroupBot:
         except Exception as e:
             logger.error(f"Failed to start bot: {str(e)}")
             raise
-
 
 if __name__ == '__main__':
     try:
