@@ -27,7 +27,7 @@ class GigaChengGroupBot:
             # Load environment variables
             load_dotenv()
             
-            # Initialize OpenAI client with beta header
+            # Initialize OpenAI client with required headers
             self.client = OpenAI(
                 api_key=Settings.OPENAI_API_KEY,
                 default_headers={
@@ -35,16 +35,37 @@ class GigaChengGroupBot:
                 }
             )
             
+            # Initialize the assistant with file search capability
+            self.assistant = self.client.beta.assistants.retrieve(
+                assistant_id=Settings.ASSISTANT_ID
+            )
+            
+            # Log assistant configuration
+            logger.info(f"""
+Assistant Configuration:
+ID: {self.assistant.id}
+Name: {self.assistant.name}
+Model: {self.assistant.model}
+File IDs: {self.assistant.file_ids}
+            """)
+            
+            if not self.assistant.file_ids:
+                logger.warning("No files attached to assistant. File search may not work.")
+            
             self.decision_engine = DecisionEngine()
             self.bot_username = "GIGACHENG_BOT"
             self.analysis_logger = AnalysisLogger()
-            self.response_handler = ResponseHandler(self.client, self.decision_engine)
+            self.response_handler = ResponseHandler(
+                self.client, 
+                self.decision_engine, 
+                self.assistant
+            )
             self.message_processor = MessageProcessor(
                 self.decision_engine,
                 self.response_handler,
                 self.analysis_logger
             )
-            logger.info("Bot initialized successfully")
+            logger.info("Bot initialized successfully with file search capability")
         except Exception as e:
             logger.error(f"Failed to initialize bot: {str(e)}")
             raise
