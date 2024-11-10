@@ -4,8 +4,6 @@ from telegram.ext import Application, MessageHandler, CommandHandler, filters
 from openai import OpenAI
 import logging
 from datetime import datetime
-import os
-from pathlib import Path
 from dotenv import load_dotenv
 from message import Message
 from settings import Settings
@@ -24,9 +22,11 @@ logger = logging.getLogger(__name__)
 class GigaChengGroupBot:
     def __init__(self):
         try:
-            # Just load environment variables and create client
-            load_dotenv()
-            self.client = OpenAI(api_key=Settings.OPENAI_API_KEY)
+            # Initialize OpenAI client with v2 API configuration
+            self.client = OpenAI(
+                api_key=Settings.OPENAI_API_KEY,
+                default_headers={"OpenAI-Beta": "assistants=v2"}
+            )
             
             # Initialize components
             self.decision_engine = DecisionEngine()
@@ -38,9 +38,25 @@ class GigaChengGroupBot:
                 self.response_handler,
                 self.analysis_logger
             )
-            logger.info("Bot initialized successfully")
+            
+            # Check assistant configuration
+            self._check_assistant_config()
+            
+            logger.info("Bot initialized successfully with v2 API")
         except Exception as e:
             logger.error(f"Failed to initialize bot: {str(e)}")
+            raise
+
+    def _check_assistant_config(self):
+        """Verify assistant configuration"""
+        try:
+            assistant = self.client.beta.assistants.retrieve(Settings.ASSISTANT_ID)
+            logger.info(f"Assistant Configuration:")
+            logger.info(f"Name: {assistant.name}")
+            logger.info(f"Model: {assistant.model}")
+            
+        except Exception as e:
+            logger.error(f"Error checking assistant configuration: {str(e)}")
             raise
 
     async def handle_group_message(self, update: Update, context):
@@ -80,6 +96,17 @@ class GigaChengGroupBot:
                 
         except Exception as e:
             logger.error(f"Error handling message: {str(e)}")
+
+    async def _daily_summary_task(self):
+        """Generate daily summary at end of day"""
+        try:
+            summary = self.analysis_logger.generate_daily_summary()
+            self.analysis_logger.log_aggregate_stats({
+                'date': datetime.now().strftime('%Y-%m-%d'),
+                'summary': summary
+            })
+        except Exception as e:
+            logger.error(f"Error generating daily summary: {str(e)}")
 
     def run(self):
         """Run the bot"""
