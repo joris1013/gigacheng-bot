@@ -3,3 +3,4 @@ analysis_logs/
 __pycache__/
 *.pyc
 *.log
+openai-assistant-v2.py
