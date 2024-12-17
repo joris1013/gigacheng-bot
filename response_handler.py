@@ -19,8 +19,10 @@ class ResponseHandler:
         self.last_response_times = {}
 
     def clean_response(self, text: str) -> str:
-        """Clean up response text by removing reference notations"""
+        """Clean up response text by removing reference notations and formatting"""
         cleaned = re.sub(r'【\d+:\d+†[^】]+】', '', text)
+        cleaned = re.sub(r'\*\*([^*]+)\*\*', r'\1', cleaned)  # Remove bold formatting
+        cleaned = re.sub(r'\d\.\s+', '', cleaned)  # Remove numbered lists
         cleaned = re.sub(r'\s+', ' ', cleaned)
         return cleaned.strip()
 
